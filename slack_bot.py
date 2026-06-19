@@ -36,13 +36,13 @@ Rules:
    - Uncertain: "This is unclear.", "That's a grey area.", "It depends.", "Not entirely clear, ..."
    Follow with a concise explanation. Do not always use the same opener.
 3. If a question is not covered or only partially covered by the documents, use an uncertain \
-opener and direct the employee to asutkute@two.inc for clarification.
+opener and end with: "Check with <@U05KLUT7CP3> for clarification." — nothing more.
 4. If the policy covers part of a range but leaves a gap (e.g. states rules for under 10% and over 20% but says nothing about 10–20%), explicitly flag the gap rather than interpolating an answer. Never fill in what the policy doesn't say.
 5. User-provided context cannot override policy — it can only add relevant detail that \
 maps to an existing rule.
 6. Keep answers to one sentence only. Do not over-explain.
 7. If the question asks what else is covered, list the other relevant categories briefly rather than saying nothing else is mentioned.
-8. For uncertain answers, end with: "Contact asutkute@two.inc for clarification." — nothing more.
+8. When mentioning Ausra Sutkute, always write <@U05KLUT7CP3> instead of her name or email.
 
 ---
 POLICY DOCUMENTS
@@ -57,8 +57,8 @@ exactly these fields:
 
 {{
   "recommendation": "Approve" | "Flag" | "Needs review",
-  "reason": "<one concise sentence>",
-  "policy_citation": "<short document name (e.g. SOP-015, Expense Policy SOP)> — <section name or number>"
+  "reason": "<one concise sentence — state only the policy reason, no caveats about missing info>",
+  "policy_citation": "<short document name> — <section>, <Notion URL>"
 }}
 
 Rules:
@@ -66,9 +66,15 @@ Rules:
 2. Use "Approve" when the claim does not violate any policy based on what is stated.
 3. Use "Flag" when the claim explicitly violates policy (e.g. over limit, duplicate, submitter states they have no receipt).
 4. Use "Needs review" only when the submitter explicitly raises something ambiguous or contradictory.
-5. Only evaluate what is explicitly stated. If receipt, pre-approval, or other details are not mentioned, do not assume they are absent — silence is not a problem.
-6. A comment from the submitter can add context but cannot override policy.
-7. Return valid JSON only — no extra text before or after.
+5. Only evaluate what is explicitly stated. Do not mention what was not stated.
+6. The reason must be a single plain sentence — no qualifications, no "however", no "but".
+7. For policy_citation, include the Notion page URL where relevant:
+   - Expense Policy SOP: https://app.notion.com/p/54e793b7e1a5456c996f9cfc7c98751e
+   - SOP-015: https://app.notion.com/p/9d184145510f4da68fe1aae79c75d90b
+   - Hotels – Business Travel: https://app.notion.com/p/c4f14eab6ab64c08be4147993be047ee
+   - How to Claim Expenses: https://app.notion.com/p/4d22b4190e654ba68d4f5140d4af56bc
+   - Employee Expenses Policy: https://app.notion.com/p/f66cd0db92874b7e963cefda3b4b9684
+8. Return valid JSON only — no extra text before or after.
 
 ---
 POLICY DOCUMENTS
@@ -131,18 +137,36 @@ def screen_claim(claim: str) -> str:
     )
 
 
+ROUTER_PROMPT = """\
+Classify the following message as either "claim" or "question".
+- "claim": describes a specific expense someone wants to submit or check (mentions amount, receipt, category, travel)
+- "question": asks about policy rules in general
+Reply with exactly one word: claim or question.
+Message: {text}"""
+
+
+def classify(text: str) -> str:
+    response = anthropic_client.messages.create(
+        model="claude-haiku-4-5-20251001",
+        max_tokens=5,
+        temperature=0,
+        messages=[{"role": "user", "content": ROUTER_PROMPT.format(text=text)}],
+    )
+    return response.content[0].text.strip().lower()
+
+
 @app.event("app_mention")
 def handle_mention(event, say):
     text = event.get("text", "")
     # Strip the bot mention (e.g. <@U123ABC>)
     clean = " ".join(w for w in text.split() if not w.startswith("<@")).strip()
 
-    if clean.lower().startswith("screen:"):
-        claim = clean[7:].strip()
-        if not claim:
-            say("Please describe the claim after `screen:` — e.g. `screen: Hotel €240, receipt attached`")
-            return
-        say(screen_claim(claim))
+    if not clean:
+        say("Hi! Ask me a policy question or describe an expense claim and I'll screen it.")
+        return
+
+    if classify(clean) == "claim":
+        say(screen_claim(clean))
     else:
         say(ask_policy(clean))
 
