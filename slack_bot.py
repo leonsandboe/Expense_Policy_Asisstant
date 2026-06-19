@@ -98,6 +98,8 @@ screener_system = SCREENER_SYSTEM_PROMPT.format(docs=docs)
 
 anthropic_client = anthropic.Anthropic()
 
+_processed_events: set = set()
+
 app = App(
     token=os.environ["SLACK_BOT_TOKEN"],
     signing_secret=os.environ["SLACK_SIGNING_SECRET"],
@@ -129,7 +131,10 @@ def screen_claim(claim: str) -> str:
         raw = raw.split("```")[1]
         if raw.startswith("json"):
             raw = raw[4:]
-    result = json.loads(raw.strip())
+    # Extract just the JSON object in case of extra text
+    start = raw.find("{")
+    end = raw.rfind("}") + 1
+    result = json.loads(raw[start:end])
     return (
         f"*Recommendation:* {result['recommendation']}\n"
         f"*Reason:* {result['reason']}\n"
@@ -157,6 +162,11 @@ def classify(text: str) -> str:
 
 @app.event("app_mention")
 def handle_mention(event, say):
+    event_id = event.get("client_msg_id") or event.get("ts")
+    if event_id in _processed_events:
+        return
+    _processed_events.add(event_id)
+
     text = event.get("text", "")
     # Strip the bot mention (e.g. <@U123ABC>)
     clean = " ".join(w for w in text.split() if not w.startswith("<@")).strip()
